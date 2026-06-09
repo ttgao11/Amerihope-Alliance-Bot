@@ -2,7 +2,7 @@
 
 Two ways to drive the [NYSCEF Case Search by Name](https://iapps.courts.state.ny.us/nyscef/CaseSearch?TAB=name):
 
-1. **Highlighted cell** — in Google Sheets, highlight a cell formatted `First//Last`. The cells to its right hold the filing **start date** and **end date**. The extension runs the search and writes the result link into the cell directly below.
+1. **Highlighted cell** — in Google Sheets, highlight a cell formatted `First//Last`. The cells to its right hold the filing **start date** and **end date**. The extension runs the search and writes the result link into the cell three to the right.
 2. **Batch from sheet URL** — paste a public sheet URL, the extension runs every row in turn.
 
 > NYSCEF sits behind a Cloudflare browser challenge, so the search has to be driven through a real Chrome tab — that's why this is a Chrome extension and not a pure Google Sheets macro / Apps Script.
