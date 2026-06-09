@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "NYSCEF Name Search Batch",
+  "version": "0.2.0",
+  "description": "Batch-search the NYSCEF Case Search (by name) from a public Google Sheet of first/last names. Opens a result tab per row.",
+  "permissions": ["tabs", "scripting", "storage"],
+  "host_permissions": [
+    "https://iapps.courts.state.ny.us/*",
+    "https://docs.google.com/*",
+    "https://*.googleusercontent.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "NYSCEF Name Search Batch",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://iapps.courts.state.ny.us/nyscef/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
