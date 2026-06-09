@@ -1,6 +1,6 @@
 // Content script: runs on iapps.courts.state.ny.us/nyscef/*.
 // Two roles depending on which page we land on:
-//   1) Search form page: fill First/Last, submit.
+//   1) Search form page: fill First/Last + optional date range, submit.
 //   2) Results page: scrape the result rows.
 //
 // The form submit causes a navigation, so we use sessionStorage on the tab to
@@ -37,6 +37,36 @@
       if (el) return el;
     }
     return findByLabel(/last\s*name/i);
+  }
+
+  function findStartDateField() {
+    const candidates = [
+      "input[name*='StartDate' i]",
+      "input[id*='StartDate' i]",
+      "input[name*='DateFrom' i]",
+      "input[id*='DateFrom' i]",
+      "input[name*='FilingDateFrom' i]",
+    ];
+    for (const sel of candidates) {
+      const el = document.querySelector(sel);
+      if (el) return el;
+    }
+    return findByLabel(/start\s*date|filing\s*date.*from|date.*from|from.*date/i);
+  }
+
+  function findEndDateField() {
+    const candidates = [
+      "input[name*='EndDate' i]",
+      "input[id*='EndDate' i]",
+      "input[name*='DateTo' i]",
+      "input[id*='DateTo' i]",
+      "input[name*='FilingDateTo' i]",
+    ];
+    for (const sel of candidates) {
+      const el = document.querySelector(sel);
+      if (el) return el;
+    }
+    return findByLabel(/end\s*date|filing\s*date.*to|date.*to|to.*date|thru/i);
   }
 
   function findByLabel(regex) {
@@ -99,19 +129,28 @@
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function fillAndSubmit(first, last) {
+  function fillAndSubmit(first, last, startDate, endDate) {
     const firstEl = findFirstNameField();
     const lastEl = findLastNameField();
     if (!firstEl || !lastEl) throw new Error("Could not locate First/Last name fields on the page.");
     setReactNativeValue(firstEl, first);
     setReactNativeValue(lastEl, last);
 
+    if (startDate) {
+      const startEl = findStartDateField();
+      if (startEl) setReactNativeValue(startEl, startDate);
+    }
+    if (endDate) {
+      const endEl = findEndDateField();
+      if (endEl) setReactNativeValue(endEl, endDate);
+    }
+
     const form = firstEl.closest("form") || lastEl.closest("form");
     const submit = findSubmitButton(form);
 
     try {
       sessionStorage.setItem(PENDING_KEY, "1");
-      sessionStorage.setItem(NAME_KEY, JSON.stringify({ first, last }));
+      sessionStorage.setItem(NAME_KEY, JSON.stringify({ first, last, startDate, endDate }));
     } catch (_) {}
 
     if (submit) {
@@ -218,7 +257,7 @@
     chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (msg.type === "DO_SEARCH") {
         try {
-          fillAndSubmit(msg.first || "", msg.last || "");
+          fillAndSubmit(msg.first || "", msg.last || "", msg.startDate || "", msg.endDate || "");
           sendResponse({ ok: true });
         } catch (err) {
           chrome.runtime.sendMessage({ type: "SEARCH_ERROR", error: err.message });

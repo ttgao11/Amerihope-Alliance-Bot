@@ -22,6 +22,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         type: "DO_SEARCH",
         first: entry.payload.first,
         last: entry.payload.last,
+        startDate: entry.payload.startDate || "",
+        endDate: entry.payload.endDate || "",
       });
     }
     sendResponse({ ok: true });
@@ -64,7 +66,12 @@ async function handleRunSearch(msg) {
     pendingByTab.set(tab.id, {
       resolve,
       reject,
-      payload: { first: msg.first, last: msg.last },
+      payload: {
+        first: msg.first,
+        last: msg.last,
+        startDate: msg.startDate || "",
+        endDate: msg.endDate || "",
+      },
       closeTab: !!msg.closeTab,
       timer,
       searchSent: false,

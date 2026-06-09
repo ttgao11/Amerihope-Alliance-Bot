@@ -6,36 +6,48 @@
 </head>
 <body>
   <h1>NYSCEF Name Search</h1>
-  <p class="hint">Paste a Google Sheet URL. Share setting must be <b>Anyone with the link &middot; Viewer</b>. The sheet needs a header row with a <b>First Name</b> and <b>Last Name</b> column.</p>
 
-  <div class="row">
-    <input type="text" id="sheetUrl" placeholder="https://docs.google.com/spreadsheets/d/...&#8203;/edit#gid=0" />
-  </div>
-  <div class="actions">
-    <button id="load">Load sheet</button>
-  </div>
+  <section class="section">
+    <h2>Highlighted cell</h2>
+    <p class="hint">Switch to your Google Sheet, highlight a cell containing <code>First//Last</code>. The cells to its right should be the filing <b>start date</b> and <b>end date</b>. The result link is written to the cell directly below.</p>
+    <div id="sheetsStatus" class="status">Detecting active tab&hellip;</div>
+    <div class="actions">
+      <button id="searchHighlighted" disabled>Search highlighted cell</button>
+    </div>
+  </section>
 
-  <div id="preview" class="preview hidden">
-    <div><span id="rowcount">0</span> rows detected.</div>
-    <div class="cols">First-name column: <code id="firstCol">?</code> &middot; Last-name column: <code id="lastCol">?</code></div>
-  </div>
+  <section class="section">
+    <h2>Batch from sheet URL</h2>
+    <p class="hint">Or paste a public Google Sheet URL (Anyone with link &middot; Viewer) with First Name and Last Name columns. Runs the whole sheet.</p>
+    <div class="row">
+      <input type="text" id="sheetUrl" placeholder="https://docs.google.com/spreadsheets/d/...&#8203;/edit#gid=0" />
+    </div>
+    <div class="actions">
+      <button id="load">Load sheet</button>
+    </div>
 
-  <div class="row">
-    <label>Delay between rows (sec): <input type="number" id="delay" value="3" min="0" max="60" step="1" /></label>
-  </div>
-  <div class="row">
-    <label><input type="checkbox" id="closeTabs" /> Close each results tab after scraping</label>
-  </div>
+    <div id="preview" class="preview hidden">
+      <div><span id="rowcount">0</span> rows detected.</div>
+      <div class="cols">First-name column: <code id="firstCol">?</code> &middot; Last-name column: <code id="lastCol">?</code></div>
+    </div>
 
-  <div class="actions">
-    <button id="start" disabled>Start</button>
-    <button id="stop" disabled>Stop</button>
-  </div>
+    <div class="row">
+      <label>Delay between rows (sec): <input type="number" id="delay" value="3" min="0" max="60" step="1" /></label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="closeTabs" /> Close each results tab after scraping</label>
+    </div>
 
-  <div id="progress" class="progress hidden">
-    <div class="bar"><div id="barfill"></div></div>
-    <div id="progressText">0 / 0</div>
-  </div>
+    <div class="actions">
+      <button id="start" disabled>Start</button>
+      <button id="stop" disabled>Stop</button>
+    </div>
+
+    <div id="progress" class="progress hidden">
+      <div class="bar"><div id="barfill"></div></div>
+      <div id="progressText">0 / 0</div>
+    </div>
+  </section>
 
   <h2>Log</h2>
   <pre id="log"></pre>
