@@ -124,17 +124,19 @@
   // (the popup is window-focused; this content script is not, so we can't
   // write to the clipboard from here). We then try paste strategies in order
   // and verify by reading back the target cell.
-  async function writeValueToCell(targetRef, value, fromClipboard) {
+  async function writeValueToCell(targetRef, value, fromClipboard, htmlValue) {
     const str = String(value);
     const errors = [];
 
     // Strategy 1: synthetic paste event carrying the value in clipboardData.
-    // Some sites read paste data from the event itself.
+    // Some sites read paste data from the event itself. If htmlValue is set,
+    // include text/html so Sheets can paste rich text with hyperlinks.
     await navigateTo(targetRef);
     await sleep(120);
     try {
       const dt = new DataTransfer();
       dt.setData("text/plain", str);
+      if (htmlValue) dt.setData("text/html", htmlValue);
       const paste = new ClipboardEvent("paste", {
         clipboardData: dt,
         bubbles: true,
@@ -145,7 +147,7 @@
         : document.body;
       target.dispatchEvent(paste);
       await sleep(400);
-      if (await verifyCellEquals(targetRef, str)) return;
+      if (await verifyCellEquals(targetRef, str, htmlValue)) return;
     } catch (e) {
       errors.push("synthetic paste: " + (e.message || String(e)));
     }
@@ -166,7 +168,7 @@
         fireKey(fb, "Enter");
         fireKey(document, "Enter");
         await sleep(280);
-        if (await verifyCellEquals(targetRef, str)) return;
+        if (await verifyCellEquals(targetRef, str, htmlValue)) return;
         if (!ok) errors.push("execCommand paste returned false");
       } catch (e) {
         errors.push("execCommand paste: " + (e.message || String(e)));
@@ -192,7 +194,7 @@
       fireKey(fb, "Enter");
       fireKey(document, "Enter");
       await sleep(280);
-      if (await verifyCellEquals(targetRef, str)) return;
+      if (await verifyCellEquals(targetRef, str, htmlValue)) return;
     } catch (e) {
       errors.push("insertText: " + (e.message || String(e)));
     }
@@ -211,12 +213,20 @@
     el.focus();
   }
 
-  async function verifyCellEquals(targetRef, expected) {
+  async function verifyCellEquals(targetRef, expected, htmlValue) {
     // Enter usually moves selection one row down; navigate back to read.
     await navigateTo(targetRef);
     await sleep(150);
-    const got = await readCurrentCellValue();
-    return String(got).trim() === String(expected).trim();
+    const got = String(await readCurrentCellValue()).trim();
+    if (got === String(expected).trim()) return true;
+    // For rich-text paste the formula bar shows the cell's text content (e.g.
+    // the concatenated link text), not the source plain-text version. Accept
+    // if at least one of the URLs from the HTML payload landed in the cell.
+    if (htmlValue) {
+      const urls = (htmlValue.match(/href="([^"]+)"/g) || []).map((m) => m.slice(6, -1));
+      if (urls.length && urls.some((u) => got.includes(u))) return true;
+    }
+    return false;
   }
 
   // --- RPCs ------------------------------------------------------------
@@ -248,13 +258,13 @@
       name,
       startDate,
       endDate,
-      belowRef: offset(parsed, 0, 1),
-      twoBelowRef: offset(parsed, 0, 2),
+      caseLinkRef: offset(parsed, 3, 0),
+      docLinkRef: offset(parsed, 4, 0),
     };
   }
 
-  async function writeLink({ cellRef, value, fromClipboard }) {
-    await writeValueToCell(cellRef, value || "", !!fromClipboard);
+  async function writeLink({ cellRef, value, htmlValue, fromClipboard }) {
+    await writeValueToCell(cellRef, value || "", !!fromClipboard, htmlValue || "");
   }
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

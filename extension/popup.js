@@ -373,75 +373,99 @@ searchHighlightedBtn.addEventListener("click", async () => {
       log("Could not copy link to clipboard: " + e.message);
     }
 
-    log(`Writing link to ${info.belowRef}…`);
-    let caseLinkWritten = false;
+    log(`Writing link to ${info.caseLinkRef}…`);
     try {
       await sendToTab(tab.id, {
         type: "SHEETS_WRITE_LINK",
-        cellRef: info.belowRef,
+        cellRef: info.caseLinkRef,
         value: link,
         fromClipboard: clipboardOk,
       });
       log("Case link written. ✓");
-      caseLinkWritten = true;
     } catch (err) {
       log("Auto-paste failed: " + err.message);
       if (clipboardOk) {
-        log(`The link is in your clipboard. Click cell ${info.belowRef} and press Ctrl+V (Cmd+V on Mac).`);
+        log(`The link is in your clipboard. Click cell ${info.caseLinkRef} and press Ctrl+V (Cmd+V on Mac).`);
       } else {
         log("Link: " + link);
       }
     }
 
-    // --- Step 2: open the case page and grab the SUMMONS + COMPLAINT link.
-    log("Opening case page to find SUMMONS + COMPLAINT…");
-    let docLink = null;
+    // --- Step 2: open the case page and grab every link in the Document column.
+    log("Opening case page to collect Document column links…");
+    let docLinks = [];
     let diagnostic = null;
     try {
       const docRes = await runFindDoc(link);
-      docLink = docRes && docRes.link;
+      docLinks = (docRes && docRes.links) || [];
       diagnostic = docRes && docRes.diagnostic;
     } catch (err) {
-      log("Couldn't fetch SUMMONS + COMPLAINT link: " + err.message);
+      log("Couldn't fetch document links: " + err.message);
     }
-    if (!docLink) {
-      log("No SUMMONS + COMPLAINT link found on the page from " + link);
+    if (!docLinks.length) {
+      log("No document links found on the page from " + link);
       if (diagnostic) {
         log("Page snapshot (so we can refine the matcher):\n" + diagnostic);
       }
       return;
     }
-    log("Found doc link: " + docLink);
+    log(`Found ${docLinks.length} document link(s).`);
 
-    const docCellRef = info.twoBelowRef;
+    const docCellRef = info.docLinkRef;
     if (!docCellRef) {
-      log("Could not compute target cell for doc link.");
+      log("Could not compute target cell for doc links.");
       return;
     }
 
+    // One cell, all links. Plain-text fallback is a JSON-array string like
+    // ["url1","url2","url3"]. The HTML version preserves the brackets, quotes
+    // and commas as literal text but wraps each URL in an <a> tag so a
+    // successful rich-text paste makes each URL clickable.
+    const docPlainValue = JSON.stringify(docLinks);
+    const escHtml = (s) =>
+      String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const docHtmlValue =
+      "[" +
+      docLinks
+        .map((u) => {
+          const eh = escHtml(u);
+          return `&quot;<a href="${eh}">${eh}</a>&quot;`;
+        })
+        .join(",") +
+      "]";
+
     let docClipOk = false;
     try {
-      await navigator.clipboard.writeText(docLink);
+      if (typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {
+        const item = new ClipboardItem({
+          "text/plain": new Blob([docPlainValue], { type: "text/plain" }),
+          "text/html": new Blob([docHtmlValue], { type: "text/html" }),
+        });
+        await navigator.clipboard.write([item]);
+      } else {
+        await navigator.clipboard.writeText(docPlainValue);
+      }
       docClipOk = true;
     } catch (e) {
-      log("Could not copy doc link to clipboard: " + e.message);
+      log("Could not copy doc links to clipboard: " + e.message);
     }
 
-    log(`Writing doc link to ${docCellRef}…`);
+    log(`Writing doc links to ${docCellRef}…`);
     try {
       await sendToTab(tab.id, {
         type: "SHEETS_WRITE_LINK",
         cellRef: docCellRef,
-        value: docLink,
+        value: docPlainValue,
+        htmlValue: docHtmlValue,
         fromClipboard: docClipOk,
       });
-      log("Doc link written. ✓");
+      log("Doc links written. ✓ (If they aren't clickable, Sheets dropped the rich-text formatting on paste — let me know and I'll switch to one cell per link.)");
     } catch (err) {
       log("Doc auto-paste failed: " + err.message);
       if (docClipOk) {
-        log(`The doc link is in your clipboard. Click cell ${docCellRef} and press Ctrl+V (Cmd+V on Mac).`);
+        log(`The doc links are in your clipboard. Click cell ${docCellRef} and press Ctrl+V (Cmd+V on Mac).`);
       } else {
-        log("Doc link: " + docLink);
+        log("Doc links:\n" + docPlainValue);
       }
     }
   } finally {

@@ -227,6 +227,49 @@
     return null;
   }
 
+  // Collect every link in the "Document" column. Returns an array of hrefs
+  // in row order, or null if the Document column couldn't be located.
+  function findAllDocumentLinks() {
+    const HEADER_MATCH = (txt) => {
+      const t = (txt || "").trim().toLowerCase();
+      return t === "document" || t === "documents" || t === "doc" || t === "doc type" || t === "document type";
+    };
+    const tables = Array.from(document.querySelectorAll("table"));
+    for (const t of tables) {
+      const rows = Array.from(t.querySelectorAll("tr"));
+      let headerRowIdx = -1;
+      let docColIdx = -1;
+      for (let r = 0; r < rows.length; r++) {
+        const cells = Array.from(rows[r].children).filter((c) => c.tagName === "TH" || c.tagName === "TD");
+        for (let i = 0; i < cells.length; i++) {
+          if (HEADER_MATCH(cells[i].innerText || cells[i].textContent)) {
+            headerRowIdx = r;
+            docColIdx = i;
+            break;
+          }
+        }
+        if (headerRowIdx >= 0) break;
+      }
+      if (headerRowIdx < 0) continue;
+      const out = [];
+      const seen = new Set();
+      for (let r = headerRowIdx + 1; r < rows.length; r++) {
+        const cells = Array.from(rows[r].children).filter((c) => c.tagName === "TD" || c.tagName === "TH");
+        if (cells.length <= docColIdx) continue;
+        const a = cells[docColIdx].querySelector("a[href]");
+        if (!a) continue;
+        const href = a.href;
+        if (seen.has(href)) continue;
+        seen.add(href);
+        out.push(href);
+      }
+      if (out.length) return out;
+    }
+    // Fallback: just the SUMMONS + COMPLAINT link as a single-item array.
+    const summons = findSummonsLink();
+    return summons ? [summons] : null;
+  }
+
   // Both step-1 and step-2 may need a brief retry while the page hydrates.
   async function waitForFinder(finder, timeoutMs) {
     const start = Date.now();
@@ -413,10 +456,10 @@
         return true;
       }
       if (msg.type === "FIND_DOC_LINK") {
-        waitForFinder(findSummonsLink, 12000)
-          .then((link) => {
-            const diagnostic = link ? null : gatherDiagnostic();
-            chrome.runtime.sendMessage({ type: "DOC_LINK_FOUND", link, diagnostic });
+        waitForFinder(findAllDocumentLinks, 12000)
+          .then((links) => {
+            const diagnostic = (links && links.length) ? null : gatherDiagnostic();
+            chrome.runtime.sendMessage({ type: "DOC_LINK_FOUND", links: links || [], diagnostic });
             sendResponse({ ok: true });
           })
           .catch((err) => {

@@ -73,7 +73,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (entry) {
       clearTimeout(entry.timer);
       pendingByTab.delete(sender.tab.id);
-      entry.resolve({ link: msg.link || null, diagnostic: msg.diagnostic || null });
+      entry.resolve({
+        link: msg.link || null,
+        links: msg.links || null,
+        diagnostic: msg.diagnostic || null,
+      });
       if (entry.closeTab) setTimeout(() => chrome.tabs.remove(sender.tab.id).catch(() => {}), 500);
     }
     sendResponse({ ok: true });
@@ -117,13 +121,14 @@ async function handleRunSearch(msg) {
 }
 
 async function handleRunFindDoc(msg) {
-  // Open the case URL pasted into the sheet, find the link with text
-  // "SUMMONS + COMPLAINT" on that page, return its href.
+  // Open the case URL pasted into the sheet, collect every link in the
+  // Document column, return them as an array.
   const res = await openTabForRole(msg.url, "docfetch-step2");
+  const links = res && res.links ? res.links : (res && res.link ? [res.link] : []);
   return {
-    link: res ? res.link : null,
+    links,
     diagnostic: res ? res.diagnostic : null,
-    stage: res && res.link ? "ok" : "no-summons-link",
+    stage: links.length ? "ok" : "no-doc-links",
   };
 }
 
