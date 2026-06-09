@@ -1,4 +1,5 @@
-// Popup controller: drives both modes — highlighted cell and batch.
+// Popup controller: read names from a public Google Sheet, drive the batch.
+// Results stay in the popup log + open result tabs; no spreadsheet writeback.
 
 const $ = (id) => document.getElementById(id);
 const sheetUrlInput = $("sheetUrl");
@@ -20,7 +21,7 @@ const searchHighlightedBtn = $("searchHighlighted");
 
 const SEARCH_URL = "https://iapps.courts.state.ny.us/nyscef/CaseSearch?TAB=name";
 
-let rows = [];
+let rows = [];        // [{ first, last, _rowIdx }]
 let running = false;
 let stopRequested = false;
 
@@ -37,21 +38,27 @@ function setProgress(done, total) {
   progressText.textContent = `${done} / ${total}`;
 }
 
+// --- Sheet URL -> CSV export URL --------------------------------------
+
 function buildExportUrl(input) {
   const raw = (input || "").trim();
   if (!raw) throw new Error("Paste a Google Sheet URL.");
+  // Accept a bare ID
   if (/^[A-Za-z0-9_-]{20,}$/.test(raw)) {
     return `https://docs.google.com/spreadsheets/d/${raw}/export?format=csv`;
   }
   const m = raw.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]+)/);
   if (!m) throw new Error("That doesn't look like a Google Sheet URL.");
   const id = m[1];
+  // gid can be in either the hash (#gid=…) or the query (?gid=…)
   const gidMatch = raw.match(/[#&?]gid=(\d+)/);
   const gid = gidMatch ? gidMatch[1] : null;
   let url = `https://docs.google.com/spreadsheets/d/${id}/export?format=csv`;
   if (gid) url += `&gid=${gid}`;
   return url;
 }
+
+// --- Minimal CSV parser (RFC-4180-ish) --------------------------------
 
 function parseCsv(text) {
   const rows = [];
@@ -76,13 +83,14 @@ function parseCsv(text) {
         cur.push(field); field = "";
         rows.push(cur); cur = [];
       } else if (c === "\r") {
-        // ignore
+        // ignore; \n will close the row
       } else {
         field += c;
       }
     }
   }
   if (field.length || cur.length) { cur.push(field); rows.push(cur); }
+  // drop trailing empty rows
   while (rows.length && rows[rows.length - 1].every((c) => c === "")) rows.pop();
   return rows;
 }
@@ -106,6 +114,8 @@ function findColumn(header, candidates) {
   return -1;
 }
 
+// --- Load button ------------------------------------------------------
+
 loadBtn.addEventListener("click", async () => {
   preview.classList.add("hidden");
   startBtn.disabled = true;
@@ -126,6 +136,8 @@ loadBtn.addEventListener("click", async () => {
     log("Fetch failed: " + err.message);
     return;
   }
+  // If the sheet isn't shared publicly Google sometimes returns an HTML sign-in
+  // page (with HTTP 200). Detect that and report cleanly.
   if (/<html|sign in|signin/i.test(text.slice(0, 500)) && !text.split("\n")[0].includes(",")) {
     log("Got an HTML page instead of CSV. Make sure the sheet is shared as 'Anyone with the link · Viewer'.");
     return;
@@ -157,6 +169,8 @@ loadBtn.addEventListener("click", async () => {
   startBtn.disabled = rows.length === 0;
   log(`Loaded ${rows.length} name row(s).`);
 });
+
+// --- Start / Stop -----------------------------------------------------
 
 startBtn.addEventListener("click", async () => {
   if (running) return;
@@ -231,8 +245,11 @@ async function detectSheetsTab() {
 }
 
 function formatDateForNyscef(raw) {
+  // Sheets' formula bar gives us things like "1/5/2024", "01/05/2024",
+  // "2024-01-05", "Jan 5, 2024", or a Date-typed string. Normalize to mm/dd/yyyy.
   const s = String(raw || "").trim();
   if (!s) return "";
+  // Already mm/dd/yyyy or m/d/yyyy
   let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
   if (m) {
     const mo = m[1].padStart(2, "0");
@@ -241,15 +258,17 @@ function formatDateForNyscef(raw) {
     if (yr.length === 2) yr = (parseInt(yr, 10) > 50 ? "19" : "20") + yr;
     return `${mo}/${da}/${yr}`;
   }
+  // ISO yyyy-mm-dd
   m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (m) return `${m[2].padStart(2, "0")}/${m[3].padStart(2, "0")}/${m[1]}`;
+  // Fallback — let Date try
   const d = new Date(s);
   if (!isNaN(d.getTime())) {
     const mo = String(d.getMonth() + 1).padStart(2, "0");
     const da = String(d.getDate()).padStart(2, "0");
     return `${mo}/${da}/${d.getFullYear()}`;
   }
-  return s;
+  return s; // give up; pass through
 }
 
 function sendToTabOnce(tabId, msg) {
@@ -274,7 +293,9 @@ async function sendToTab(tabId, msg) {
     return await sendToTabOnce(tabId, msg);
   } catch (err) {
     if (!/Receiving end does not exist|Could not establish connection/i.test(err.message)) throw err;
+    // Content script not present — inject and retry once.
     await ensureSheetsContentScript(tabId);
+    // Tiny delay to let the script attach its onMessage listener.
     await new Promise((r) => setTimeout(r, 100));
     return await sendToTabOnce(tabId, msg);
   }
@@ -353,6 +374,7 @@ searchHighlightedBtn.addEventListener("click", async () => {
     }
 
     log(`Writing link to ${info.belowRef}…`);
+    let caseLinkWritten = false;
     try {
       await sendToTab(tab.id, {
         type: "SHEETS_WRITE_LINK",
@@ -361,6 +383,7 @@ searchHighlightedBtn.addEventListener("click", async () => {
         fromClipboard: clipboardOk,
       });
       log("Case link written. ✓");
+      caseLinkWritten = true;
     } catch (err) {
       log("Auto-paste failed: " + err.message);
       if (clipboardOk) {
@@ -369,9 +392,72 @@ searchHighlightedBtn.addEventListener("click", async () => {
         log("Link: " + link);
       }
     }
+
+    // --- Step 2: open the case page and grab the SUMMONS + COMPLAINT link.
+    log("Opening case page to find SUMMONS + COMPLAINT…");
+    let docLink = null;
+    let diagnostic = null;
+    try {
+      const docRes = await runFindDoc(link);
+      docLink = docRes && docRes.link;
+      diagnostic = docRes && docRes.diagnostic;
+    } catch (err) {
+      log("Couldn't fetch SUMMONS + COMPLAINT link: " + err.message);
+    }
+    if (!docLink) {
+      log("No SUMMONS + COMPLAINT link found on the page from " + link);
+      if (diagnostic) {
+        log("Page snapshot (so we can refine the matcher):\n" + diagnostic);
+      }
+      return;
+    }
+    log("Found doc link: " + docLink);
+
+    const docCellRef = info.twoBelowRef;
+    if (!docCellRef) {
+      log("Could not compute target cell for doc link.");
+      return;
+    }
+
+    let docClipOk = false;
+    try {
+      await navigator.clipboard.writeText(docLink);
+      docClipOk = true;
+    } catch (e) {
+      log("Could not copy doc link to clipboard: " + e.message);
+    }
+
+    log(`Writing doc link to ${docCellRef}…`);
+    try {
+      await sendToTab(tab.id, {
+        type: "SHEETS_WRITE_LINK",
+        cellRef: docCellRef,
+        value: docLink,
+        fromClipboard: docClipOk,
+      });
+      log("Doc link written. ✓");
+    } catch (err) {
+      log("Doc auto-paste failed: " + err.message);
+      if (docClipOk) {
+        log(`The doc link is in your clipboard. Click cell ${docCellRef} and press Ctrl+V (Cmd+V on Mac).`);
+      } else {
+        log("Doc link: " + docLink);
+      }
+    }
   } finally {
     searchHighlightedBtn.disabled = false;
   }
 });
+
+function runFindDoc(caseUrl) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({ type: "RUN_FIND_DOC", url: caseUrl }, (resp) => {
+      if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+      if (!resp) return reject(new Error("No response from background"));
+      if (resp.error) return reject(new Error(resp.error));
+      resolve(resp.result);
+    });
+  });
+}
 
 initSheetsMode();

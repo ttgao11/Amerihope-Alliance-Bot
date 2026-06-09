@@ -35,7 +35,10 @@ Usage:
 
 Date cells can be real Date values (`12/31/2024`), text (`12/31/2024`), or ISO (`2024-12-31`). The extension normalizes them to `mm/dd/yyyy` for NYSCEF.
 
-**How writing back works** (because Sheets renders cells in canvas): the popup pre-copies the link to the system clipboard (the popup window is focused, so it can), then the content script in the Sheets tab navigates to the target cell via the Name Box and triggers a paste via three fallback strategies: a synthetic paste event, `document.execCommand('paste')` from the focused formula bar, and `insertText` + Enter. If all three fail, the link is still in your clipboard for manual Cmd+V.
+**Caveats for this mode** (because Google Sheets renders cells in canvas):
+
+- Reading neighbors works by briefly navigating the Name Box to `B<row>` / `C<row>` and reading the formula bar. You'll see the selection move and then snap back. Don't type during the operation.
+- Writing the link uses the formula bar. If selectors drift (Sheets ships UI changes), the extension surfaces a clear error so we can patch the selectors in `sheets.js`.
 
 ## Mode 2 — Batch from sheet URL
 
@@ -52,17 +55,17 @@ Header variations accepted:
 
 ## File layout
 
-- `manifest.json` — MV3; host access to `iapps.courts.state.ny.us` and `docs.google.com`; `clipboardRead` / `clipboardWrite` permissions for the writeback path.
+- `manifest.json` — MV3; host access to `iapps.courts.state.ny.us` and `docs.google.com`.
 - `popup.html` / `popup.css` / `popup.js` — UI for both modes.
-- `background.js` — opens NYSCEF tabs, brokers messages between popup and content scripts; threads `startDate`/`endDate` through to the form-fill step.
+- `background.js` — opens NYSCEF tabs, brokers messages between popup and content scripts.
 - `content.js` — on NYSCEF pages: fills First/Last + date range, submits, scrapes the results table.
-- `sheets.js` — on `docs.google.com/spreadsheets/*`: reads the active cell + neighbors via the Name Box + formula bar; writes back via paste strategies.
+- `sheets.js` — on `docs.google.com/spreadsheets/*`: reads the active cell + neighbors via the Name Box + formula bar; writes back the link.
 
 ## Troubleshooting
 
 - **"Could not find Sheets Name Box / formula bar."** — Google updated the Sheets UI. Tell me what changed and I'll update the selectors in `sheets.js`.
 - **"Could not locate First/Last name fields on the page."** — NYSCEF changed the search form. View the extension's service-worker logs (link from `chrome://extensions`), inspect the page, and share the new input `id`/`name`.
-- **"Write did not commit. Tried: …"** — all three paste strategies failed. The link is still on your clipboard; paste it manually. Tell me which strategies failed and how, and I'll add a fourth.
+- **No link written, log says "0 result(s)"** — the date range may be too narrow, the name was spelled differently in NYSCEF, or NYSCEF returned its CAPTCHA. Open the search tab manually and check.
 - **The popup says "No Google Sheets tab is active"** even though I have Sheets open — Chrome's popup queries the *currently active* tab. Switch focus to the Sheets tab first, then click the extension icon.
 
 ## Notes

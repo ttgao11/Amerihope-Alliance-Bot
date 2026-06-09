@@ -35,6 +35,16 @@ h2 { font-size: 12px; margin: 12px 0 4px; color: var(--muted); text-transform: u
 .row { margin: 6px 0; }
 .row label { display: inline-flex; align-items: center; gap: 6px; }
 input[type="number"] { width: 60px; padding: 2px 4px; }
+.file {
+  display: block;
+  border: 1px dashed var(--border);
+  padding: 14px;
+  border-radius: 6px;
+  text-align: center;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+.file input { display: none; }
 .preview { background: #f6f8fa; border: 1px solid var(--border); padding: 8px; border-radius: 6px; margin-bottom: 10px; }
 .preview .cols { color: var(--muted); margin-top: 4px; font-size: 12px; }
 .actions { display: flex; gap: 6px; margin-top: 8px; }

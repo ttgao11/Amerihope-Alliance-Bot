@@ -3,11 +3,16 @@
 //   - SHEETS_READ_ROW : reads the active cell + the two cells to the right.
 //   - SHEETS_WRITE_LINK : writes a value into a specific A1-notation cell.
 //
-// Sheets renders cell content on a <canvas>, so we cannot read cell values
-// from the DOM directly. The two real DOM elements that mirror the active
-// cell are the Name Box (top-left, shows the active cell ref) and the
-// formula bar (shows the active cell's literal value). We drive selection
-// through the Name Box and read/write values through the formula bar.
+// Implementation notes (read carefully — this is fragile by nature):
+// Sheets renders cell content on a <canvas>, so we cannot read cell values from
+// the DOM directly. The two real DOM elements that mirror the active cell are:
+//   - The Name Box (top-left): shows the active cell ref ("A5"). It is also
+//     an input — typing a ref into it and pressing Enter navigates Sheets.
+//   - The formula bar: shows the active cell's literal value/formula. It is
+//     a contentEditable element.
+// We use the Name Box to drive selection and the formula bar to read/write
+// values. Selectors below try several known IDs; Sheets renames these from
+// time to time.
 
 (() => {
   const NAME_BOX_SELECTORS = [
@@ -43,7 +48,10 @@
     return String(el.innerText || el.textContent || "");
   };
 
+  // --- A1 ref parsing ---------------------------------------------------
+
   function parseRef(ref) {
+    // Accepts "A5", "AB12", "'Sheet name'!A5", or "Sheet2!A5"
     const m = String(ref || "").trim().match(/^(?:('?)([^'!]+)\1!)?([A-Z]+)(\d+)$/);
     if (!m) return null;
     return { sheet: m[2] || "", col: m[3], row: parseInt(m[4], 10) };
@@ -69,6 +77,8 @@
     const prefix = parsed.sheet ? `${parsed.sheet.includes(" ") ? `'${parsed.sheet}'` : parsed.sheet}!` : "";
     return `${prefix}${col}${row}`;
   }
+
+  // --- Navigation + read/write -----------------------------------------
 
   function setNativeValue(el, value) {
     const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -102,6 +112,7 @@
   }
 
   async function readCurrentCellValue() {
+    // Give Sheets a tick to settle the formula bar after a navigation.
     await sleep(60);
     const fb = getFormulaBar();
     if (!fb) throw new Error("Could not find Sheets formula bar.");
@@ -117,6 +128,8 @@
     const str = String(value);
     const errors = [];
 
+    // Strategy 1: synthetic paste event carrying the value in clipboardData.
+    // Some sites read paste data from the event itself.
     await navigateTo(targetRef);
     await sleep(120);
     try {
@@ -137,6 +150,9 @@
       errors.push("synthetic paste: " + (e.message || String(e)));
     }
 
+    // Strategy 2: click into the formula bar so Sheets enters edit mode, then
+    // ask the browser to paste from the system clipboard (the popup put the
+    // value there). Requires "clipboardRead" permission.
     if (fromClipboard) {
       await navigateTo(targetRef);
       await sleep(120);
@@ -157,6 +173,7 @@
       }
     }
 
+    // Strategy 3: click formula bar, select all, insertText, Enter.
     await navigateTo(targetRef);
     await sleep(120);
     try {
@@ -195,17 +212,21 @@
   }
 
   async function verifyCellEquals(targetRef, expected) {
+    // Enter usually moves selection one row down; navigate back to read.
     await navigateTo(targetRef);
     await sleep(150);
     const got = await readCurrentCellValue();
     return String(got).trim() === String(expected).trim();
   }
 
+  // --- RPCs ------------------------------------------------------------
+
   async function readRow() {
     const nb = getNameBox();
     if (!nb) throw new Error("Could not find Sheets Name Box.");
     const startRef = readText(nb).trim();
     if (!startRef) throw new Error("No active cell.");
+    // If a range is selected ("A5:B6"), use the anchor.
     const anchorRef = startRef.split(":")[0];
     const parsed = parseRef(anchorRef);
     if (!parsed) throw new Error("Could not parse active cell ref: " + startRef);
@@ -219,6 +240,7 @@
     await navigateTo(right2Ref);
     const endDate = await readCurrentCellValue();
 
+    // Navigate back to the original cell so the user's selection looks unchanged.
     await navigateTo(anchorRef);
 
     return {
@@ -227,6 +249,7 @@
       startDate,
       endDate,
       belowRef: offset(parsed, 0, 1),
+      twoBelowRef: offset(parsed, 0, 2),
     };
   }
 
